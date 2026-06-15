@@ -1,0 +1,205 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+
+typedef struct Edge {
+    int to;
+    int w;
+    int id;
+    struct Edge *next;
+} Edge;
+
+typedef struct {
+    Edge **adj;
+    int n;
+    int m;
+    int edge_count;
+} Graph;
+
+Graph *mkgraph(int n, int m){
+    Graph *g = malloc(sizeof(Graph));
+    g->n = n;
+    g->m = m;
+    g->adj = calloc(n+1, sizeof(Edge*));
+    g->edge_count = 0;
+    return g;
+}
+
+void add_edge(Graph *g, int u, int v, int w){
+    Edge *e = malloc(sizeof(Edge));
+    e->to = v; e->w = w; e->id = ++g->edge_count;
+    e->next = g->adj[u]; g->adj[u] = e;
+}
+
+void add_und(Graph *g, int u, int v, int w){
+    add_edge(g,u,v,w);
+    add_edge(g,v,u,w);
+}
+
+typedef struct {
+    int node;
+    long dist;
+} Item;
+
+typedef struct {
+    Item *a;
+    int n, cap;
+} MinHeap;
+
+MinHeap *mkheap(int cap){
+    MinHeap *h = malloc(sizeof(MinHeap));
+    h->a = malloc(sizeof(Item)*(cap+5));
+    h->n = 0; h->cap = cap+5;
+    return h;
+}
+
+void hswap(Item *x, Item *y){ Item t=*x; *x=*y; *y=t; }
+
+void push(MinHeap *h, int node, long dist){
+    if(h->n+1 >= h->cap){
+        h->cap *= 2;
+        h->a = realloc(h->a, sizeof(Item)*h->cap);
+    }
+    int i = ++h->n;
+    h->a[i].node = node; h->a[i].dist = dist;
+    while(i>1 && h->a[i].dist < h->a[i/2].dist){
+        hswap(&h->a[i], &h->a[i/2]); i/=2;
+    }
+}
+
+Item popmin(MinHeap *h){
+    Item out = { -1, -1 };
+    if(h->n==0) return out;
+    out = h->a[1];
+    h->a[1] = h->a[h->n--];
+    int i=1;
+    while(1){
+        int L=2*i, R=2*i+1, s=i;
+        if(L<=h->n && h->a[L].dist < h->a[s].dist) s=L;
+        if(R<=h->n && h->a[R].dist < h->a[s].dist) s=R;
+        if(s==i) break;
+        hswap(&h->a[i], &h->a[s]);
+        i=s;
+    }
+    return out;
+}
+
+void dijkstra(Graph *g, int src, long *dist, int *parent, int *parent_edge, int *blocked){
+    int n = g->n;
+    for(int i=1;i<=n;i++){ dist[i] = LLONG_MAX; parent[i] = -1; parent_edge[i] = -1; }
+    MinHeap *h = mkheap(128);
+    dist[src]=0;
+    push(h, src, 0);
+    while(h->n){
+        Item it = popmin(h);
+        int u = it.node;
+        long du = it.dist;
+        if(du != dist[u]) continue;
+        for(Edge *e = g->adj[u]; e; e = e->next){
+            if(blocked && blocked[e->id]) continue;
+            int v = e->to;
+            long nd = du + e->w;
+            if(nd < dist[v]){
+                dist[v] = nd;
+                parent[v] = u;
+                parent_edge[v] = e->id;
+                push(h, v, nd);
+            }
+        }
+    }
+    free(h->a); free(h);
+}
+
+void print_path(int *parent, int src, int dest){
+    int stack[10000], top=0;
+    int cur = dest;
+    while(cur!=-1){
+        stack[top++]=cur;
+        if(cur==src) break;
+        cur = parent[cur];
+    }
+    if(top==0 || stack[top-1] != src){
+        printf("no path\n");
+        return;
+    }
+    for(int i=top-1;i>=0;i--){
+        printf("%d", stack[i]);
+        if(i) printf(" -> ");
+    }
+    printf("\n");
+}
+
+void mark_blocked(Graph *g, int *blocked, int bu, int bv){
+    for(Edge *e = g->adj[bu]; e; e = e->next){
+        if(e->to == bv) blocked[e->id] = 1;
+    }
+    for(Edge *e = g->adj[bv]; e; e = e->next){
+        if(e->to == bu) blocked[e->id] = 1;
+    }
+}
+
+int main(){
+    int n, m;
+    printf("Nodes: "); if(scanf("%d",&n)!=1) return 0;
+    printf("Edges: "); if(scanf("%d",&m)!=1) return 0;
+    Graph *g = mkgraph(n, m);
+    printf("Enter edges (u v w):\n");
+    for(int i=0;i<m;i++){
+        int u,v,w; scanf("%d %d %d",&u,&v,&w);
+        add_und(g,u,v,w);
+    }
+    int s;
+    printf("Emergency vehicle start: "); scanf("%d",&s);
+    int k;
+    printf("Number of hospitals: "); scanf("%d",&k);
+    int *hosp = malloc(sizeof(int)*k);
+    printf("Hospital nodes:\n");
+    for(int i=0;i<k;i++) scanf("%d",&hosp[i]);
+
+    int bc;
+    printf("Blocked roads count: "); scanf("%d",&bc);
+    int *blocked = calloc(g->edge_count+5, sizeof(int));
+    if(bc>0){
+        printf("Enter blocked edges (u v):\n");
+        for(int i=0;i<bc;i++){
+            int bu,bv; scanf("%d %d",&bu,&bv);
+            mark_blocked(g, blocked, bu, bv);
+        }
+    }
+
+    long *dist = malloc(sizeof(long)*(n+1));
+    int *parent = malloc(sizeof(int)*(n+1));
+    int *parent_edge = malloc(sizeof(int)*(n+1));
+
+    dijkstra(g, s, dist, parent, parent_edge, blocked);
+
+    long best = LLONG_MAX;
+    int best_h = -1;
+    for(int i=0;i<k;i++){
+        int node = hosp[i];
+        if(node>=1 && node<=n){
+            if(dist[node] < best){
+                best = dist[node];
+                best_h = node;
+            }
+        }
+    }
+
+    if(best_h == -1 || best == LLONG_MAX){
+        printf("No reachable hospital\n");
+    } else {
+        printf("Nearest hospital: %d (distance %ld)\n", best_h, best);
+        printf("Path: ");
+        print_path(parent, s, best_h);
+    }
+
+    for(int i=1;i<=n;i++){
+        Edge *e = g->adj[i];
+        while(e){ Edge *t=e; e=e->next; free(t); }
+    }
+
+    free(g->adj); free(g);
+    free(hosp); free(blocked); free(dist); free(parent); free(parent_edge);
+    return 0;
+}
